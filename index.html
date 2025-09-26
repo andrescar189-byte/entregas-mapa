@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Organizador de Entregas</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 0; }
+    #map { height: 50vh; }
+    textarea, input, button { width: 90%; margin: 10px auto; display: block; }
+    #output { white-space: pre-wrap; padding: 10px; }
+  </style>
+</head>
+<body>
+  <h2 style="text-align:center;">📦 Organizador de Entregas</h2>
+  <textarea id="addresses" rows="6">Gijón, Costa\nAvilés, Industrial\nMadrid, Centro\nBarcelona, Este</textarea>
+  <input type="text" id="zoneFilter" placeholder="Filtrar por zona (opcional)" />
+  <button onclick="processDeliveries()">Calcular y mostrar rutas</button>
+  <div id="output"></div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+  <script>
+    let map = L.map('map').setView([43.36, -5.85], 6); // Asturias
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    async function geocode(address) {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      return data[0] ? [parseFloat(data[0].lat), parseFloat(data[0].lon)] : null;
+    }
+
+    async function processDeliveries() {
+      const raw = document.getElementById("addresses").value.trim().split("\n");
+      const zoneFilter = document.getElementById("zoneFilter").value.trim().toLowerCase();
+      const output = document.getElementById("output");
+      output.textContent = "⏳ Calculando...\n";
+
+      navigator.geolocation.getCurrentPosition(async pos => {
+        const origin = [pos.coords.latitude, pos.coords.longitude];
+        map.setView(origin, 7);
+        L.marker(origin).addTo(map).bindPopup("📍 Tu ubicación").openPopup();
+
+        let results = [];
+        for (let line of raw) {
+          if (line.includes(",")) {
+            const [address, zone] = line.split(",").map(s => s.trim());
+            if (zoneFilter && zone.toLowerCase() !== zoneFilter) continue;
+            const coords = await geocode(address);
+            if (coords) {
+              const dist = map.distance(origin, coords) / 1000;
+              results.push({ address, zone, coords, dist: dist.toFixed(2), time: (dist / 60).toFixed(2) });
+            }
+          }
+        }
+
+        results.sort((a, b) => b.dist - a.dist);
+        output.textContent = results.map(r => `${r.address} (${r.zone}): ${r.dist} km, ${r.time} h`).join("\n");
+
+        results.forEach(r => {
+          L.marker(r.coords).addTo(map).bindPopup(`${r.address}`);
+          L.Routing.control({
+            waypoints: [L.latLng(origin), L.latLng(r.coords)],
+            createMarker: () => null,
+            addWaypoints: false,
+            routeWhileDragging: false,
+            show: false
+          }).addTo(map);
+        });
+      });
+    }
+  </script>
+</body>
+</html>
