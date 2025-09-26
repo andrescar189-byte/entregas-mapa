@@ -18,8 +18,8 @@
   <div id="container">
     <div id="tools">
       <h2>📦 Organizador de Entregas</h2>
-      <textarea id="addresses" rows="6">Calle Uría 25, Oviedo, Centro\nAvenida de Galicia 12, Avilés, Industrial\nCalle Marqués de San Esteban 8, Gijón, Costa</textarea>
-      <select id="zoneFilter"><option value="">Todas las zonas</option></select>
+      <textarea id="addresses" rows="6">Calle Uría 25, Oviedo\nAvenida de Galicia 12, Avilés\nCalle Marqués de San Esteban 8, Gijón</textarea>
+      <select id="zoneFilter"><option value="">Todos los pueblos</option></select>
       <select id="addressSelector"><option value="">Selecciona una dirección</option></select>
       <button onclick="processDeliveries()">📍 Calcular rutas individuales</button>
       <button onclick="optimizeRoute()">🚀 Ruta optimizada</button>
@@ -39,10 +39,7 @@
     let origin = null;
     let addressData = [];
 
-    const zoneColors = {
-      "Costa": "blue", "Centro": "green", "Industrial": "red",
-      "Montaña": "brown", "Interior": "orange", "Occidente": "purple", "Este": "pink"
-    };
+    const townColors = {};
 
     async function geocode(address) {
       const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`;
@@ -57,9 +54,9 @@
       });
       addressData = [];
       document.getElementById("addressSelector").innerHTML = '<option value="">Selecciona una dirección</option>';
-      document.getElementById("zoneFilter").innerHTML = '<option value="">Todas las zonas</option>';
+      document.getElementById("zoneFilter").innerHTML = '<option value="">Todos los pueblos</option>';
       const raw = document.getElementById("addresses").value.trim().split("\n");
-      const zonesSet = new Set();
+      const townsSet = new Set();
       const output = document.getElementById("output");
       output.textContent = "⏳ Calculando...\n";
 
@@ -74,45 +71,48 @@
           const parts = line.split(",");
           if (parts.length >= 2) {
             const address = parts.slice(0, -1).join(",").trim();
-            const zone = parts[parts.length - 1].trim();
-            zonesSet.add(zone);
+            const town = parts[parts.length - 1].trim();
+            townsSet.add(town);
             const coords = await geocode(address);
             if (coords) {
               const dist = map.distance(origin, coords) / 1000;
-              const info = { address, zone, coords, dist: dist.toFixed(2), time: (dist / 60).toFixed(2), index: count++ };
+              const info = { address, town, coords, dist: dist.toFixed(2), time: (dist / 60).toFixed(2), index: count++ };
               results.push(info);
               addressData.push(info);
 
-              const color = zoneColors[zone] || "gray";
+              if (!townColors[town]) {
+                townColors[town] = `hsl(${Math.floor(Math.random() * 360)}, 70%, 50%)`;
+              }
+
               const icon = L.divIcon({
                 className: "marker-label",
-                html: `<div style="background:${color};color:white;border-radius:50%;padding:4px 8px;">${info.index}</div>`,
+                html: `<div style="background:${townColors[town]};color:white;border-radius:50%;padding:4px 8px;">${info.index}</div>`,
                 iconSize: [30, 30],
                 iconAnchor: [15, 15]
               });
 
-              L.marker(coords, { icon }).addTo(map).bindPopup(`${info.index}. ${address}<br><b>Zona:</b> ${zone}`);
+              L.marker(coords, { icon }).addTo(map).bindPopup(`${info.index}. ${address}<br><b>Pueblo:</b> ${town}`);
 
               const option = document.createElement("option");
               option.value = address;
-              option.textContent = `${info.index}. ${address} (${zone})`;
+              option.textContent = `${info.index}. ${address} (${town})`;
               document.getElementById("addressSelector").appendChild(option);
             }
           }
         }
 
-        zonesSet.forEach(z => {
+        townsSet.forEach(t => {
           const opt = document.createElement("option");
-          opt.value = z;
-          opt.textContent = z;
+          opt.value = t;
+          opt.textContent = t;
           document.getElementById("zoneFilter").appendChild(opt);
         });
 
-        const selectedZone = document.getElementById("zoneFilter").value;
-        const filtered = selectedZone ? results.filter(r => r.zone === selectedZone) : results;
+        const selectedTown = document.getElementById("zoneFilter").value;
+        const filtered = selectedTown ? results.filter(r => r.town === selectedTown) : results;
 
         filtered.sort((a, b) => b.dist - a.dist);
-        output.textContent = filtered.map(r => `${r.index}. ${r.address} (${r.zone}): ${r.dist} km, ${r.time} h`).join("\n");
+        output.textContent = filtered.map(r => `${r.index}. ${r.address} (${r.town}): ${r.dist} km, ${r.time} h`).join("\n");
 
         filtered.forEach(r => {
           L.Routing.control({
@@ -131,7 +131,7 @@
       const found = addressData.find(a => a.address === selected);
       if (found) {
         map.setView(found.coords, 12);
-        L.popup().setLatLng(found.coords).setContent(`${found.index}. ${found.address}<br><b>Zona:</b> ${found.zone}`).openOn(map);
+        L.popup().setLatLng(found.coords).setContent(`${found.index}. ${found.address}<br><b>Pueblo:</b> ${found.town}`).openOn(map);
         L.Routing.control({
           waypoints: [L.latLng(origin), L.latLng(found.coords)],
           createMarker: () => null,
