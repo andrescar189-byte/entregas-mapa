@@ -39,7 +39,12 @@
     let origin = null;
     let addressData = [];
 
-    const townColors = {};
+    function getDistanceColor(dist) {
+      if (dist <= 10) return "green";
+      if (dist <= 30) return "yellow";
+      if (dist <= 60) return "orange";
+      return "red";
+    }
 
     async function geocode(address) {
       const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`;
@@ -80,13 +85,9 @@
               results.push(info);
               addressData.push(info);
 
-              if (!townColors[town]) {
-                townColors[town] = `hsl(${Math.floor(Math.random() * 360)}, 70%, 50%)`;
-              }
-
               const icon = L.divIcon({
                 className: "marker-label",
-                html: `<div style="background:${townColors[town]};color:white;border-radius:50%;padding:4px 8px;">${info.index}</div>`,
+                html: `<div style="background:${getDistanceColor(dist)};color:white;border-radius:50%;padding:4px 8px;">${info.index}</div>`,
                 iconSize: [30, 30],
                 iconAnchor: [15, 15]
               });
