@@ -4,79 +4,58 @@
   <meta charset="UTF-8" />
   <title>Organizador de Entregas</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
-    body { font-family: sans-serif; margin: 0; padding: 0; background: #f4f4f4; }
-    #controls { background: #fff; padding: 15px; }
-    #map { height: 50vh; }
+    body { margin: 0; font-family: sans-serif; background: #f4f4f4; }
+    #container { display: flex; flex-wrap: wrap; }
+    #tools { flex: 1 1 300px; padding: 15px; background: #fff; }
+    #map { flex: 2 1 600px; height: 80vh; }
     textarea, select, button { width: 100%; margin: 10px 0; padding: 8px; font-size: 1em; }
-    #output { white-space: pre-wrap; padding: 10px; background: #fff; margin-top: 10px; }
+    #output { white-space: pre-wrap; background: #fff; padding: 10px; margin-top: 10px; }
   </style>
 </head>
 <body>
-  <div id="controls">
-    <h2>📦 Organizador de Entregas</h2>
-    <textarea id="addresses" rows="6">Calle Uría 25, Oviedo, Centro\nAvenida de Galicia 12, Avilés, Industrial\nCalle Marqués de San Esteban 8, Gijón, Costa</textarea>
-    <select id="zoneFilter"><option value="">Todas las zonas</option></select>
-    <select id="addressSelector"><option value="">Selecciona una dirección</option></select>
-    <button onclick="initDeliveries()">🚀 Calcular rutas</button>
+  <div id="container">
+    <div id="tools">
+      <h2>📦 Organizador de Entregas</h2>
+      <textarea id="addresses" rows="6">Calle Uría 25, Oviedo, Centro\nAvenida de Galicia 12, Avilés, Industrial\nCalle Marqués de San Esteban 8, Gijón, Costa</textarea>
+      <select id="zoneFilter"><option value="">Todas las zonas</option></select>
+      <select id="addressSelector"><option value="">Selecciona una dirección</option></select>
+      <button onclick="processDeliveries()">📍 Calcular rutas individuales</button>
+      <button onclick="optimizeRoute()">🚀 Ruta optimizada</button>
+      <div id="output"></div>
+    </div>
+    <div id="map"></div>
   </div>
-  <div id="map"></div>
-  <div id="output"></div>
 
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAOpe72ZN7qzjB_RZ9oxhjCa0V9d_DOss4&libraries=places"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
   <script>
-    let map, userLocation, directionsService, directionsRenderer;
+    let map = L.map('map').setView([43.36, -5.85], 8);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; CartoDB'
+    }).addTo(map);
+
+    let origin = null;
+    let addressData = [];
+
     const zoneColors = {
-      "Costa": "#2196F3",
-      "Centro": "#4CAF50",
-      "Industrial": "#F44336",
-      "Montaña": "#795548",
-      "Interior": "#FF9800",
-      "Occidente": "#9C27B0",
-      "Este": "#E91E63"
+      "Costa": "blue", "Centro": "green", "Industrial": "red",
+      "Montaña": "brown", "Interior": "orange", "Occidente": "purple", "Este": "pink"
     };
-    const markers = [];
-    const addressData = [];
 
-    function initMap() {
-      map = new google.maps.Map(document.getElementById("map"), {
-        center: { lat: 43.36, lng: -5.85 },
-        zoom: 8
-      });
-      directionsService = new google.maps.DirectionsService();
-      directionsRenderer = new google.maps.DirectionsRenderer({ suppressMarkers: true });
-      directionsRenderer.setMap(map);
-
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(pos => {
-          userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          new google.maps.Marker({
-            position: userLocation,
-            map,
-            label: "Tú",
-            title: "📍 Tu ubicación"
-          });
-          map.setCenter(userLocation);
-        });
-      }
+    async function geocode(address) {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      return data[0] ? [parseFloat(data[0].lat), parseFloat(data[0].lon)] : null;
     }
 
-    async function geocodeAddress(address) {
-      const geocoder = new google.maps.Geocoder();
-      return new Promise((resolve, reject) => {
-        geocoder.geocode({ address }, (results, status) => {
-          if (status === "OK" && results[0]) {
-            resolve(results[0].geometry.location);
-          } else {
-            resolve(null);
-          }
-        });
+    async function processDeliveries() {
+      map.eachLayer(layer => {
+        if (layer instanceof L.Marker || layer instanceof L.Routing.Control) map.removeLayer(layer);
       });
-    }
-
-    async function initDeliveries() {
-      markers.forEach(m => m.setMap(null));
-      addressData.length = 0;
+      addressData = [];
       document.getElementById("addressSelector").innerHTML = '<option value="">Selecciona una dirección</option>';
       document.getElementById("zoneFilter").innerHTML = '<option value="">Todas las zonas</option>';
       const raw = document.getElementById("addresses").value.trim().split("\n");
@@ -84,70 +63,100 @@
       const output = document.getElementById("output");
       output.textContent = "⏳ Calculando...\n";
 
-      let index = 1;
-      for (let line of raw) {
-        const parts = line.split(",");
-        if (parts.length >= 2) {
-          const address = parts.slice(0, -1).join(",").trim();
-          const zone = parts[parts.length - 1].trim();
-          zonesSet.add(zone);
-          const location = await geocodeAddress(address);
-          if (location) {
-            const info = { index, address, zone, location };
-            addressData.push(info);
+      navigator.geolocation.getCurrentPosition(async pos => {
+        origin = [pos.coords.latitude, pos.coords.longitude];
+        map.setView(origin, 8);
+        L.marker(origin).addTo(map).bindPopup("📍 Tu ubicación").openPopup();
 
-            const marker = new google.maps.Marker({
-              position: location,
-              map,
-              label: `${index}`,
-              title: `${address} (${zone})`,
-              icon: {
-                path: google.maps.SymbolPath.CIRCLE,
-                scale: 10,
-                fillColor: zoneColors[zone] || "gray",
-                fillOpacity: 1,
-                strokeWeight: 1
-              }
-            });
-            markers.push(marker);
+        let results = [];
+        let count = 1;
+        for (let line of raw) {
+          const parts = line.split(",");
+          if (parts.length >= 2) {
+            const address = parts.slice(0, -1).join(",").trim();
+            const zone = parts[parts.length - 1].trim();
+            zonesSet.add(zone);
+            const coords = await geocode(address);
+            if (coords) {
+              const dist = map.distance(origin, coords) / 1000;
+              const info = { address, zone, coords, dist: dist.toFixed(2), time: (dist / 60).toFixed(2), index: count++ };
+              results.push(info);
+              addressData.push(info);
 
-            const opt = document.createElement("option");
-            opt.value = index;
-            opt.textContent = `${index}. ${address} (${zone})`;
-            document.getElementById("addressSelector").appendChild(opt);
-            index++;
+              const color = zoneColors[zone] || "gray";
+              const icon = L.divIcon({
+                className: "marker-label",
+                html: `<div style="background:${color};color:white;border-radius:50%;padding:4px 8px;">${info.index}</div>`,
+                iconSize: [30, 30],
+                iconAnchor: [15, 15]
+              });
+
+              L.marker(coords, { icon }).addTo(map).bindPopup(`${info.index}. ${address}<br><b>Zona:</b> ${zone}`);
+
+              const option = document.createElement("option");
+              option.value = address;
+              option.textContent = `${info.index}. ${address} (${zone})`;
+              document.getElementById("addressSelector").appendChild(option);
+            }
           }
         }
-      }
 
-      zonesSet.forEach(z => {
-        const opt = document.createElement("option");
-        opt.value = z;
-        opt.textContent = z;
-        document.getElementById("zoneFilter").appendChild(opt);
+        zonesSet.forEach(z => {
+          const opt = document.createElement("option");
+          opt.value = z;
+          opt.textContent = z;
+          document.getElementById("zoneFilter").appendChild(opt);
+        });
+
+        const selectedZone = document.getElementById("zoneFilter").value;
+        const filtered = selectedZone ? results.filter(r => r.zone === selectedZone) : results;
+
+        filtered.sort((a, b) => b.dist - a.dist);
+        output.textContent = filtered.map(r => `${r.index}. ${r.address} (${r.zone}): ${r.dist} km, ${r.time} h`).join("\n");
+
+        filtered.forEach(r => {
+          L.Routing.control({
+            waypoints: [L.latLng(origin), L.latLng(r.coords)],
+            createMarker: () => null,
+            addWaypoints: false,
+            routeWhileDragging: false,
+            show: false
+          }).addTo(map);
+        });
       });
-
-      output.textContent = addressData.map(d => `${d.index}. ${d.address} (${d.zone})`).join("\n");
     }
 
-    document.getElementById("addressSelector").addEventListener("change", () => {
-      const selected = parseInt(document.getElementById("addressSelector").value);
-      const found = addressData.find(d => d.index === selected);
-      if (found && userLocation) {
-        directionsService.route({
-          origin: userLocation,
-          destination: found.location,
-          travelMode: google.maps.TravelMode.DRIVING
-        }, (result, status) => {
-          if (status === "OK") {
-            directionsRenderer.setDirections(result);
-          }
-        });
-        map.setCenter(found.location);
+    function goToSelectedAddress() {
+      const selected = document.getElementById("addressSelector").value;
+      const found = addressData.find(a => a.address === selected);
+      if (found) {
+        map.setView(found.coords, 12);
+        L.popup().setLatLng(found.coords).setContent(`${found.index}. ${found.address}<br><b>Zona:</b> ${found.zone}`).openOn(map);
+        L.Routing.control({
+          waypoints: [L.latLng(origin), L.latLng(found.coords)],
+          createMarker: () => null,
+          addWaypoints: false,
+          routeWhileDragging: false,
+          show: false
+        }).addTo(map);
       }
-    });
+    }
 
-    window.onload = initMap;
+    function optimizeRoute() {
+      if (!origin || addressData.length === 0) return;
+      const sorted = [...addressData].sort((a, b) => a.dist - b.dist);
+      const waypoints = sorted.map(r => L.latLng(r.coords));
+      L.Routing.control({
+        waypoints: [L.latLng(origin), ...waypoints],
+        createMarker: () => null,
+        addWaypoints: false,
+        routeWhileDragging: false,
+        show: false
+      }).addTo(map);
+    }
+
+    document.getElementById("addressSelector").addEventListener("change", goToSelectedAddress);
+    document.getElementById("zoneFilter").addEventListener("change", processDeliveries);
   </script>
 </body>
 </html>
